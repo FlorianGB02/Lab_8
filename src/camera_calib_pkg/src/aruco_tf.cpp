@@ -362,12 +362,17 @@ void ArucoTF::verifyCalibration(const int &marker_id) {
   ROS_INFO_STREAM("Move robot to pose...");
   ROS_INFO_STREAM("Press ENTER to record sample.");
 
+  // initialize error vectors, mean vector, and covariance matrix
+  std::vector<float> e_x, e_y, e_z, e_qx, e_qy, e_qz, e_qw;
+  std::vector<float> mean_vector;
+  Eigen::MatrixXf cov_matrix(7,7);
+
   while (sample_cnt < ArucoTF::num_samples) {
     ROS_INFO_STREAM("Pose: " << sample_cnt + 1 << "/"
                         << ArucoTF::num_samples);
     char c = getchar();
 
-    // Get marker to world using lookup_allMarkersToWorld()
+    // Get marker to the world using lookup_allMarkersToWorld()
     tf2::Transform tf_calibMarkerToWorld;
     ArucoTF::lookup_allMarkersToWorld(ArucoTF::aruco_calib_target,
                                       tf_calibMarkerToWorld);
@@ -377,14 +382,52 @@ void ArucoTF::verifyCalibration(const int &marker_id) {
     ArucoTF::lookup_markerToWorld();
     tf2::fromMsg(ArucoTF::tform_markerToWorld, tf_toolToWorld);
 
-    // Calculate the 7 dimensional error (x,y,z,qx,qy,qz,qw) between the two
+    // Calculate the 7-dimensional error (x,y,z,qx,qy,qz,qw) between the two
+
+    e_x.push_back(tf_calibMarkerToWorld.getOrigin()[0] - tf_toolToWorld.getOrigin()[0]);
+    e_y.push_back(tf_calibMarkerToWorld.getOrigin()[1] - tf_toolToWorld.getOrigin()[1]); 
+    e_z.push_back(tf_calibMarkerToWorld.getOrigin()[2] - tf_toolToWorld.getOrigin()[2]); 
+    e_qx.push_back(tf_calibMarkerToWorld.getRotation()[0] - tf_toolToWorld.getRotation()[0]);
+    e_qy.push_back(tf_calibMarkerToWorld.getRotation()[1] - tf_toolToWorld.getRotation()[1]);
+    e_qz.push_back(tf_calibMarkerToWorld.getRotation()[2] - tf_toolToWorld.getRotation()[2]);
+    e_qw.push_back(tf_calibMarkerToWorld.getRotation()[3] - tf_toolToWorld.getRotation()[3]);
 
     sample_cnt++;
+
   }
+
   ROS_INFO_ONCE("Verification samples gathered");
 
-  // Once the errors are gathered, calculate sample mean vector and sample covariance matrix
+  std::vector<std::vector<float>> error_matrix = {e_x, e_y, e_z, e_qx, e_qy, e_qz, e_qw};
 
+  ROS_INFO_STREAM("Error matrix: " << error_matrix);
+
+  // Once the errors are gathered, calculate the sample mean vector and sample covariance matrix
+  mean_vector = {accumulate(e_x.begin(), e_x.end(), 0)/15, 
+                 accumulate(e_y.begin(), e_y.end(), 0)/15,
+                 accumulate(e_z.begin(), e_z.end(), 0)/15,
+                 accumulate(e_qx.begin(), e_qx.end(), 0)/15,
+                 accumulate(e_qy.begin(), e_qy.end(), 0)/15,
+                 accumulate(e_qz.begin(), e_qz.end(), 0)/15,
+                 accumulate(e_qw.begin(), e_qw.end(), 0)/15};
+
+  ROS_INFO_STREAM("Sample mean: " << mean_vector);
+  
+  // Define covariance matrix
+  float N = 15;
+  float sum = 0.0;
+  for (int i = 0; i < 7; i++) {
+    for (int j = 0; j < 7; j++) {
+      for (int k = 0; k < 15; k++) {
+        sum += (error_matrix[i][k]-mean_vector[i])*(error_matrix[j][k]-mean_vector[j]);
+      }
+      cov_matrix(i,j) = (1/(N-1))*sum;
+      sum = 0.0;
+    }
+  }
+
+  ROS_INFO_STREAM("Covariance matrix: " << cov_matrix);
+  
 }
 
 int main(int argc, char **argv) {
